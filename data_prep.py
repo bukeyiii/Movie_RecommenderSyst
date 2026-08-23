@@ -6,7 +6,7 @@ DATA_DIR = "data"
 TOP_N = 10000
 
 ADULT_CONTENT_PATTERN = (
-    r"porn|hentai|xxx|erotic|nudity|softcore"
+    r"porn|hentai|xxx|erotic|nudity|softcore|bigtits"
     r"|orgy|threesome|fetish\s*sex|hardcore\s*porn"
     r"|adult\s*video|pornstar|porn\s*star"
     r"|lust[- ]?fueled"
@@ -94,15 +94,6 @@ def main():
     ratings_clean = ratings[["userId", "tmdbId", "rating"]]
     ratings_clean.to_csv(f"{DATA_DIR}/ratings_clean.csv", index=False)
     print(f"Saved {len(ratings_clean)} ratings -> data/ratings_clean.csv")
-
-    if len(ratings_clean) < 500:
-        print(
-            "\nHeads up: overlap between MovieLens ratings and your movie shortlist "
-            "is thin (classic cold-start problem). If you want a denser user-item "
-            "matrix for the CF demo, raise TOP_N above and rerun. Your content-based "
-            "tab isn't affected either way since it doesn't depend on ratings."
-        )
-
 
 if __name__ == "__main__":
     main()
