@@ -368,7 +368,7 @@ def filter_by_rating(movies, min_rating, max_rating):
 
 
 # ---------------------------------------------------------------------------
-# "No account" collaborative filtering — Picking a userId
+# Collaborative filtering — Picking a userId
 # ---------------------------------------------------------------------------
 
 def recommend_from_liked_movies(ratings_df, movies_df, selected_ids, min_rating=4.0, top_n=10):
