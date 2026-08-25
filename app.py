@@ -1,13 +1,12 @@
 # ast = Abstract Syntax Trees: Convert string -> list
 import ast
 import html as html_escape
-import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 from content_based import ContentBasedRecommender
-from collaborative import SVDRecommender
+from collaborative import SVDRecommender, ItemBasedCFRecommender
 
 # For display list
 POSTER_BASE = "https://image.tmdb.org/t/p/w300"
@@ -164,6 +163,10 @@ def load_content_model(movies):
 @st.cache_resource
 def load_cf_model(ratings):
     return SVDRecommender(ratings)
+
+@st.cache_resource
+def load_item_cf_model(ratings):
+    return ItemBasedCFRecommender(ratings)
 
 @st.cache_data
 def get_unique_genres(movies):
@@ -365,40 +368,6 @@ def filter_by_overview(movies, query):
 def filter_by_rating(movies, min_rating, max_rating):
     band = movies[(movies["vote_average"] >= min_rating) & (movies["vote_average"] <= max_rating)]
     return band.sort_values("popularity", ascending=False)
-
-
-# ---------------------------------------------------------------------------
-# Collaborative filtering — Picking a userId
-# ---------------------------------------------------------------------------
-
-def recommend_from_liked_movies(ratings_df, movies_df, selected_ids, min_rating=4.0, top_n=10):
-    if not selected_ids:
-        return pd.DataFrame(), 0
-
-    # users who rated at least one of the picks highly
-    liked_by_others = ratings_df[
-        ratings_df["tmdbId"].isin(selected_ids) & (ratings_df["rating"] >= min_rating)
-    ]
-    similar_users = liked_by_others["userId"].unique()
-    if len(similar_users) == 0:
-        return pd.DataFrame(), 0
-
-    # what else that crowd rated, excluding the movies already picked
-    others_ratings = ratings_df[
-        ratings_df["userId"].isin(similar_users) & ~ratings_df["tmdbId"].isin(selected_ids)
-    ]
-    if others_ratings.empty:
-        return pd.DataFrame(), len(similar_users)
-
-    agg = others_ratings.groupby("tmdbId")["rating"].agg(avg_rating="mean", num_ratings="count")
-    # a couple of corroborating raters says more than one lone 5-star vote
-    agg["score"] = agg["avg_rating"] * np.log1p(agg["num_ratings"])
-    agg = agg.sort_values("score", ascending=False).head(top_n)
-
-    result = movies_df[movies_df["tmdbId"].isin(agg.index)].copy()
-    result = result.merge(agg[["avg_rating", "num_ratings"]], left_on="tmdbId", right_index=True)
-    return result.sort_values("avg_rating", ascending=False), len(similar_users)
-
 
 # ---------------------------------------------------------------------------
 # Movie detail page
@@ -617,6 +586,8 @@ else:
                 st.dataframe(history[["title", "rating"]].sort_values("rating", ascending=False))
 
         else:
+            item_cf_model = load_item_cf_model(ratings)
+
             title_options = get_sorted_titles(movies)
             persisted_likes = [t for t in sticky_get("liked_titles", []) if t in title_options]
             st.multiselect(
@@ -634,16 +605,14 @@ else:
                     key="cf2_top_n", on_change=sticky_save("cf2_top_n"),
                 )
                 selected_ids = movies.loc[movies["title"].isin(liked_titles), "tmdbId"].tolist()
-                recs, num_similar_users = recommend_from_liked_movies(
-                    ratings, movies, selected_ids, top_n=top_n_anon
-                )
+                recs = item_cf_model.recommend_from_liked(selected_ids, movies, top_n=top_n_anon)
                 if recs.empty:
                     st.warning(
                         "Not enough overlapping rating data to build recommendations from "
                         "these picks yet. Try adding a few more movies."
                     )
                 else:
-                    st.caption(f"Based on {num_similar_users} other viewer(s) who also rated your picks highly.")
-                    show_movie_grid(recs, score_col="avg_rating")
+                    st.caption("Based on item-item similarity to your picks (users who co-rated them alike).")
+                    show_movie_grid(recs, score_col="similarity_score")
             else:
                 st.caption("Pick a few movies you enjoy above to get started.")
