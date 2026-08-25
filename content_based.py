@@ -1,100 +1,76 @@
-import numpy as np
 import pandas as pd
-# Large user–movie rating matrix -> smaller num of latent factors
-from sklearn.decomposition import TruncatedSVD
-# Item-item similarity from co-rating patterns
+# CountVectorizer = Text -> Num
+from sklearn.feature_extraction.text import CountVectorizer
+# Calc how similar movies r based on numerical vectors
 from sklearn.metrics.pairwise import cosine_similarity
+ 
+ 
+class ContentBasedRecommender:
+    def __init__(self, movies_df: pd.DataFrame, popularity_pool: int = 30, m_quantile: float = 0.90):
+        # Reset the DtFrame index
+        self.movies = movies_df.reset_index(drop=True)
+        # Create title -> index loopup
+        self.title_to_index = pd.Series(
+            self.movies.index, index=self.movies["title"].str.lower()
+        )
+        self._build_similarity_matrix()
 
-
-class SVDRecommender:
-    # n_components: Reduce the rating matrix to 20 latent factors
-    def __init__(self, ratings_df: pd.DataFrame, n_components: int = 20):
-        # Make original dt transform to pivot table
-        self.pivot = ratings_df.pivot_table(
-            index="userId", columns="tmdbId", values="rating"
-        # Put 0 when user does not rated a movie
-        ).fillna(0)
-        self.user_ids = self.pivot.index
-        self.movie_ids = self.pivot.columns
-        # Determine num of SVD components, prevent invalid SVD configuration
-        n_comp = min(n_components, min(self.pivot.shape) - 1)
-        # Create TruncatedSVD
-        # svd: latent factors x movies
-        # random_state: Ensure result reproducible
-        svd = TruncatedSVD(n_components=n_comp, random_state=42)
-        # matrix_reduced: user x latent factors
-        matrix_reduced = svd.fit_transform(self.pivot.values)
-        # Get predicted rating by multiple matrix_reduced n svd.components_
-        self.predicted = np.dot(matrix_reduced, svd.components_)
-
-    def recommend_for_user(self, user_id: int, movies_df: pd.DataFrame, top_n: int = 10):
-        if user_id not in self.user_ids:
+        # IMDB weighted-rating
+        self.popularity_pool = popularity_pool
+        # C = Average movie rating
+        self.C = self.movies["vote_average"].mean()
+        # m = Min num of votes
+        self.m = self.movies["vote_count"].quantile(m_quantile)
+    
+    # Function: Build Similarity Matrix
+    def _build_similarity_matrix(self):
+        vectorizer = CountVectorizer(stop_words="english", max_features=20000)
+        # Fit_transform = Learn word n convert to num
+        soup_matrix = vectorizer.fit_transform(self.movies["soup"].fillna(""))
+        self.similarity = cosine_similarity(soup_matrix, soup_matrix)
+ 
+    # Function: Cal Weighted Rating
+    def _weighted_rating(self, row):
+        # Get movie num of votes
+        v = row["vote_count"]
+        # Get movie average rating
+        r = row["vote_average"]
+        return (v / (v + self.m)) * r + (self.m / (v + self.m)) * self.C
+ 
+    def recommend(self, title: str, top_n: int = 10, use_popularity_filter: bool = False) -> pd.DataFrame:
+        title_key = title.lower()
+        # If movie not exist return empty
+        if title_key not in self.title_to_index:
             return pd.DataFrame()
-        # Find user's row
-        user_row_idx = self.user_ids.get_loc(user_id)
-        # Get user's predicted ratings
-        predicted_ratings = pd.Series(self.predicted[user_row_idx], index=self.movie_ids)
-        # Find movies user alr rated
-        already_rated = self.pivot.loc[user_id]
-        # Get only movies that actually rated
-        already_rated_ids = already_rated[already_rated > 0].index
-        # Remove alr-rated movies
-        predicted_ratings = predicted_ratings.drop(index=already_rated_ids, errors="ignore")
-        # Select the top N predictions, sort highest -> lowest
-        top_ids = predicted_ratings.sort_values(ascending=False).head(top_n).index
-        # Get actual movie information
-        result = movies_df[movies_df["tmdbId"].isin(top_ids)].copy()
-        result["predicted_rating"] = result["tmdbId"].map(predicted_ratings)
-        return result.sort_values("predicted_rating", ascending=False)
-
-
-class ItemBasedCFRecommender:
-    # min_common_raters: ignore item pairs propped up by just 1-2 shared raters
-    def __init__(self, ratings_df: pd.DataFrame, min_common_raters: int = 3):
-        # Same pivot shape as SVDRecommender: rows = users, columns = movies
-        self.pivot = ratings_df.pivot_table(
-            index="userId", columns="tmdbId", values="rating"
-        ).fillna(0)
-        self.movie_ids = self.pivot.columns
-
-        # Item vectors = columns of the pivot -> transpose to movies x users
-        item_matrix = self.pivot.values.T
-
-        # Cosine similarity between every pair of movie rating-vectors
-        self.similarity = cosine_similarity(item_matrix)
-
-        # Cosine similarity is inflated for pairs with very few shared raters
-        # (e.g. 2 users who both happened to rate two obscure movies 5.0
-        # look "identical" with zero real support). Zero those out.
-        rated_mask = (self.pivot.values.T > 0).astype(int)  # movies x users
-        co_rated_counts = rated_mask @ rated_mask.T  # movies x movies
-        self.similarity[co_rated_counts < min_common_raters] = 0.0
-
-        self._movie_pos = {m: i for i, m in enumerate(self.movie_ids)}
-
-    def similar_items(self, tmdb_id: int, top_n: int = 10) -> pd.Series:
-        if tmdb_id not in self._movie_pos:
-            return pd.Series(dtype=float)
-        idx = self._movie_pos[tmdb_id]
-        scores = pd.Series(self.similarity[idx], index=self.movie_ids)
-        scores = scores.drop(index=tmdb_id, errors="ignore")
-        return scores[scores > 0].sort_values(ascending=False).head(top_n)
-
-    def recommend_from_liked(self, liked_ids, movies_df: pd.DataFrame, top_n: int = 10):
-        liked_idxs = [self._movie_pos[m] for m in liked_ids if m in self._movie_pos]
-        if not liked_idxs:
-            return pd.DataFrame()
-
-        # Average similarity of every movie to the set of liked movies
-        agg_scores = self.similarity[liked_idxs].mean(axis=0)
-        scores = pd.Series(agg_scores, index=self.movie_ids)
-        scores = scores.drop(index=liked_ids, errors="ignore")
-        scores = scores[scores > 0]
-
-        if scores.empty:
-            return pd.DataFrame()
-
-        top_ids = scores.sort_values(ascending=False).head(top_n).index
-        result = movies_df[movies_df["tmdbId"].isin(top_ids)].copy()
-        result["similarity_score"] = result["tmdbId"].map(scores)
-        return result.sort_values("similarity_score", ascending=False)
+        # Get movie index
+        idx = self.title_to_index[title_key]
+        # Handle duplicate titles
+        if isinstance(idx, pd.Series):
+            # Take first matching index
+            idx = idx.iloc[0]
+        # x = (Movie index, similarity score)
+        scores = list(enumerate(self.similarity[idx]))
+        # Sort higher scores first
+        scores = sorted(scores, key=lambda x: x[1], reverse=True)
+        # Remove the user inputed movie itself
+        scores = [s for s in scores if s[0] != idx]
+ 
+        # If weighted rating ON -> use 30, if OFF use 10
+        pool_size = self.popularity_pool if use_popularity_filter else top_n
+        scores = scores[:pool_size]
+ 
+        # Get movie index
+        movie_indices = [i for i, _ in scores]
+        # Retrieve actual movie rows
+        result = self.movies.iloc[movie_indices].copy()
+        # Add similarity scores
+        result["similarity_score"] = [s for _, s in scores]
+    
+        # If weighted rating ON
+        if use_popularity_filter:
+            # Cal weighted rating for each of those 30 movies
+            result["weighted_rating"] = result.apply(self._weighted_rating, axis=1)
+            # Sort by highest weighted rating first, then take top_n
+            result = result.sort_values("weighted_rating", ascending=False).head(top_n)
+ 
+        return result

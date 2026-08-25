@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 # Large user–movie rating matrix -> smaller num of latent factors
 from sklearn.decomposition import TruncatedSVD
+# Item-item similarity from co-rating patterns
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 class SVDRecommender:
@@ -44,3 +46,55 @@ class SVDRecommender:
         result = movies_df[movies_df["tmdbId"].isin(top_ids)].copy()
         result["predicted_rating"] = result["tmdbId"].map(predicted_ratings)
         return result.sort_values("predicted_rating", ascending=False)
+
+
+class ItemBasedCFRecommender:
+    # min_common_raters: ignore item pairs propped up by just 1-2 shared raters
+    def __init__(self, ratings_df: pd.DataFrame, min_common_raters: int = 3):
+        # Same pivot shape as SVDRecommender: rows = users, columns = movies
+        self.pivot = ratings_df.pivot_table(
+            index="userId", columns="tmdbId", values="rating"
+        ).fillna(0)
+        self.movie_ids = self.pivot.columns
+
+        # Item vectors = columns of the pivot -> transpose to movies x users
+        item_matrix = self.pivot.values.T
+
+        # Cosine similarity between every pair of movie rating-vectors
+        self.similarity = cosine_similarity(item_matrix)
+
+        # Cosine similarity is inflated for pairs with very few shared raters
+        # (e.g. 2 users who both happened to rate two obscure movies 5.0
+        # look "identical" with zero real support). Zero those out.
+        rated_mask = (self.pivot.values.T > 0).astype(int)  # movies x users
+        co_rated_counts = rated_mask @ rated_mask.T  # movies x movies
+        self.similarity[co_rated_counts < min_common_raters] = 0.0
+
+        self._movie_pos = {m: i for i, m in enumerate(self.movie_ids)}
+
+    def similar_items(self, tmdb_id: int, top_n: int = 10) -> pd.Series:
+        if tmdb_id not in self._movie_pos:
+            return pd.Series(dtype=float)
+        idx = self._movie_pos[tmdb_id]
+        scores = pd.Series(self.similarity[idx], index=self.movie_ids)
+        scores = scores.drop(index=tmdb_id, errors="ignore")
+        return scores[scores > 0].sort_values(ascending=False).head(top_n)
+
+    def recommend_from_liked(self, liked_ids, movies_df: pd.DataFrame, top_n: int = 10):
+        liked_idxs = [self._movie_pos[m] for m in liked_ids if m in self._movie_pos]
+        if not liked_idxs:
+            return pd.DataFrame()
+
+        # Average similarity of every movie to the set of liked movies
+        agg_scores = self.similarity[liked_idxs].mean(axis=0)
+        scores = pd.Series(agg_scores, index=self.movie_ids)
+        scores = scores.drop(index=liked_ids, errors="ignore")
+        scores = scores[scores > 0]
+
+        if scores.empty:
+            return pd.DataFrame()
+
+        top_ids = scores.sort_values(ascending=False).head(top_n).index
+        result = movies_df[movies_df["tmdbId"].isin(top_ids)].copy()
+        result["similarity_score"] = result["tmdbId"].map(scores)
+        return result.sort_values("similarity_score", ascending=False)
