@@ -101,7 +101,7 @@ def evaluate_content_based(movies: pd.DataFrame, k: int = 10, n_seeds: int = 200
     return {
         "k": k,
         "Num of seeds used": len(precisions),
-        "Precision": float(np.mean(precisions)),
+        "Precision@K": float(np.mean(precisions)),
     }
 
 
@@ -109,12 +109,12 @@ if __name__ == "__main__":
     movies = pd.read_csv(f"{DATA_DIR}/movies_clean.csv")
     ratings = pd.read_csv(f"{DATA_DIR}/ratings_clean.csv")
 
-    print("=== Collaborative filtering - RMSE / MAE ===")
-    cf_results = evaluate_collaborative(ratings)
-    for k, v in cf_results.items():
-        print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
-
-    print("\n======== Content-based - Precision ========")
+    print("======= Content-based - Precision@K ========")
     cb_results = evaluate_content_based(movies)
     for k, v in cb_results.items():
+        print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+
+    print("\n=== Collaborative filtering - RMSE / MAE ===")
+    cf_results = evaluate_collaborative(ratings)
+    for k, v in cf_results.items():
         print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
