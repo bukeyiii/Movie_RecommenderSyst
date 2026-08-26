@@ -64,21 +64,11 @@ class ItemBasedCFRecommender:
         self.similarity = cosine_similarity(item_matrix)
 
         # Cosine similarity is inflated for pairs with very few shared raters
-        # (e.g. 2 users who both happened to rate two obscure movies 5.0
-        # look "identical" with zero real support). Zero those out.
         rated_mask = (self.pivot.values.T > 0).astype(int)  # movies x users
         co_rated_counts = rated_mask @ rated_mask.T  # movies x movies
         self.similarity[co_rated_counts < min_common_raters] = 0.0
 
         self._movie_pos = {m: i for i, m in enumerate(self.movie_ids)}
-
-    def similar_items(self, tmdb_id: int, top_n: int = 10) -> pd.Series:
-        if tmdb_id not in self._movie_pos:
-            return pd.Series(dtype=float)
-        idx = self._movie_pos[tmdb_id]
-        scores = pd.Series(self.similarity[idx], index=self.movie_ids)
-        scores = scores.drop(index=tmdb_id, errors="ignore")
-        return scores[scores > 0].sort_values(ascending=False).head(top_n)
 
     def recommend_from_liked(self, liked_ids, movies_df: pd.DataFrame, top_n: int = 10):
         liked_idxs = [self._movie_pos[m] for m in liked_ids if m in self._movie_pos]
