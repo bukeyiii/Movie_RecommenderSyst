@@ -6,7 +6,7 @@ DATA_DIR = "data"
 TOP_N = 10000
 
 ADULT_CONTENT_PATTERN = (
-    r"porn|hentai|xxx|erotic|nudity|softcore|bigtits"
+    r"porn|hentai|xxx|erotic|nudity|softcore|bigtits|Yuzuru"
     r"|orgy|threesome|fetish\s*sex|hardcore\s*porn"
     r"|adult\s*video|pornstar|porn\s*star"
     r"|lust[- ]?fueled"
