@@ -360,9 +360,12 @@ def filter_by_overview(movies, query):
     q = query.lower().strip()
     if not q:
         return pd.DataFrame()
-    return movies[movies["overview"].str.lower().str.contains(q, na=False)].sort_values(
-        "popularity", ascending=False
-    )
+    terms = q.split()
+    overview_lower = movies["overview"].str.lower()
+    mask = pd.Series(True, index=movies.index)
+    for term in terms:
+        mask &= overview_lower.str.contains(term, na=False, regex=False)
+    return movies[mask].sort_values("popularity", ascending=False)
 
 
 def filter_by_rating(movies, min_rating, max_rating):
