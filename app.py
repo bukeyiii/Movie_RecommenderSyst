@@ -251,6 +251,7 @@ def show_movie_grid(df, score_col=None, cols_n=5):
 # Sort bar
 # ---------------------------------------------------------------------------
 
+# Handles changes when user selects a different sorting field
 def _on_sort_field_change(sort_key, asc_key, default_ascending_map=None):
     default_ascending_map = default_ascending_map or SORT_DEFAULT_ASCENDING
     field = st.session_state[sort_key]
@@ -258,7 +259,7 @@ def _on_sort_field_change(sort_key, asc_key, default_ascending_map=None):
     sticky_set(sort_key, field)
     sticky_set(asc_key, ascending)
 
-
+# Creates sorting controls for user interface
 def render_sort_controls(drop_col, dir_col, sort_key="sort_by", asc_key="sort_asc", label_col=None,
                           options=None, default_ascending_map=None):
     options = options or SORT_OPTIONS
@@ -269,6 +270,7 @@ def render_sort_controls(drop_col, dir_col, sort_key="sort_by", asc_key="sort_as
     if label_col is not None:
         with label_col:
             st.markdown('<div class="sort-bar-label">Sort by</div>', unsafe_allow_html=True)
+    # Create sorting dropdown men
     with drop_col:
         with st.container(key="sb_sort_by"):
             st.selectbox(
@@ -277,6 +279,7 @@ def render_sort_controls(drop_col, dir_col, sort_key="sort_by", asc_key="sort_as
                 key=sort_key, label_visibility="collapsed",
                 on_change=_on_sort_field_change, args=(sort_key, asc_key, default_ascending_map),
             )
+     # Create ascending/descending button
     with dir_col:
         is_best_match = sticky_get(sort_key, "Best Match") == "Best Match"
         if st.button(
@@ -288,12 +291,12 @@ def render_sort_controls(drop_col, dir_col, sort_key="sort_by", asc_key="sort_as
 
     return sticky_get(sort_key, "Best Match"), sticky_get(asc_key, False)
 
-
+# Creates complete sorting bar
 def render_sort_bar(sort_key="sort_by", asc_key="sort_asc"):
     spacer, label_col, drop_col, dir_col = st.columns([3, 0.8, 1.8, 0.5])
     return render_sort_controls(drop_col, dir_col, sort_key=sort_key, asc_key=asc_key, label_col=label_col)
 
-
+# Sorts dataframe based on the selected sorting option
 def apply_sort(df: pd.DataFrame, sort_by: str, ascending: bool, field_map=None) -> pd.DataFrame:
     field_map = field_map or SORT_FIELD
     if df.empty or sort_by == "Best Match":
@@ -311,6 +314,7 @@ def apply_sort(df: pd.DataFrame, sort_by: str, ascending: bool, field_map=None) 
 # Search-mode
 # ---------------------------------------------------------------------------
 
+# Calculates how closely text matches the search query
 def _text_match_score(text, q):
     text = text.lower()
     if text == q:
@@ -323,12 +327,13 @@ def _text_match_score(text, q):
         return 1
     return 0
 
-
+# Filters movies based on searched keyword
 def filter_by_keyword(movies, query):
     q = query.lower().strip()
     if not q:
         return pd.DataFrame()
 
+    # Calculates matching score for each movie
     def match_score(row):
         title_score = _text_match_score(str(row["title"]), q) * 2
         kw_score = max((_text_match_score(k, q) for k in row["keyword_names"]), default=0)
@@ -340,7 +345,7 @@ def filter_by_keyword(movies, query):
     scored = scored.sort_values(["_kw_match", "popularity"], ascending=[False, False])
     return scored.drop(columns="_kw_match")
 
-
+# Filters movies based on selected genres
 def filter_by_genre(movies, selected_genres):
     if not selected_genres:
         return pd.DataFrame()
@@ -355,7 +360,7 @@ def filter_by_genre(movies, selected_genres):
     scored = scored.sort_values(["_genre_match_count", "vote_average"], ascending=[False, False])
     return scored.drop(columns="_genre_match_count")
 
-
+# Filters movies based on words in movie overview
 def filter_by_overview(movies, query):
     q = query.lower().strip()
     if not q:
@@ -367,7 +372,7 @@ def filter_by_overview(movies, query):
         mask &= overview_lower.str.contains(term, na=False, regex=False)
     return movies[mask].sort_values("popularity", ascending=False)
 
-
+# Filters movies based on selected rating range
 def filter_by_rating(movies, min_rating, max_rating):
     band = movies[(movies["vote_average"] >= min_rating) & (movies["vote_average"] <= max_rating)]
     return band.sort_values("popularity", ascending=False)
@@ -376,6 +381,7 @@ def filter_by_rating(movies, min_rating, max_rating):
 # Movie detail page
 # ---------------------------------------------------------------------------
 
+# Displays details of a selected movie
 def show_movie_detail(movies, content_model, tmdb_id):
     match = movies[movies["tmdbId"] == tmdb_id]
     if match.empty:
@@ -421,11 +427,14 @@ def show_movie_detail(movies, content_model, tmdb_id):
 # App
 # ---------------------------------------------------------------------------
 
+# Configure Streamlit page
 st.set_page_config(page_title="Movie Recommender", layout="wide")
+# Apply custom CSS styling
 st.markdown(CARD_CSS, unsafe_allow_html=True)
 st.title("🎬 Movie Recommendation System")
 
 movies, ratings = load_data()
+# Load content-based recommendation model
 content_model = load_content_model(movies)
 
 raw_movie_id = st.query_params.get("movie")
@@ -436,15 +445,21 @@ if raw_movie_id not in (None, ""):
     except (TypeError, ValueError):
         selected_movie_id = None
 
+# Display movie detail page when a movie is selected
 if selected_movie_id is not None:
     show_movie_detail(movies, content_model, selected_movie_id)
 else:
     tab1, tab2 = st.tabs(["Content-Based", "Collaborative"])
 
+    # -----------------------------------------------------------------------
+    # Content-Based Filtering
+    # -----------------------------------------------------------------------
+
     with tab1:
         st.subheader("Find movies")
 
         mode_col, input_col = st.columns([1, 2])
+        # Select content-based search mode
         with mode_col:
             with st.container(key="sb_search_mode"):
                 search_mode = st.selectbox(
@@ -453,11 +468,14 @@ else:
                     key="search_mode", on_change=sticky_save("search_mode"),
                 )
 
+        # Prevent typing into the search dropdown
         lock_dropdown_typing("sb_search_mode", "sb_sort_by")
 
         results = pd.DataFrame()
 
+        # Display input based on the selected search mode
         with input_col:
+            # Search movies by title
             if search_mode == "Movie Title":
                 title_options = get_sorted_titles(movies)
                 persisted_title = sticky_get("title_pick")
@@ -469,6 +487,7 @@ else:
                     key="title_pick", on_change=sticky_save("title_pick"),
                 )
 
+            # Search movies by keyword
             elif search_mode == "Keyword":
                 st.text_input(
                     "Enter a keyword (e.g. zombie, travel)",
@@ -479,6 +498,7 @@ else:
                 if query:
                     results = filter_by_keyword(movies, query)
 
+            # Search movies by genre
             elif search_mode == "Genre":
                 all_genres = get_unique_genres(movies)
                 persisted_genres = [g for g in sticky_get("genre_pick", []) if g in all_genres]
@@ -489,7 +509,8 @@ else:
                 picked_genres = sticky_get("genre_pick", [])
                 if picked_genres:
                     results = filter_by_genre(movies, picked_genres)
-
+            
+            # Search movies by overview
             elif search_mode == "Overview":
                 st.text_input(
                     "Describe a plot or theme (e.g. Garfield gets the one thing)",
@@ -500,6 +521,7 @@ else:
                 if query:
                     results = filter_by_overview(movies, query)
 
+            # Search movies by rating range
             elif search_mode == "Rating":
                 st.slider(
                     "Rating range", 0.0, 10.0,
@@ -510,23 +532,28 @@ else:
                 results = filter_by_rating(movies, min_rating, max_rating)
 
         st.divider()
-
+        
+        # Display recommendations when searching by movie title
         if search_mode == "Movie Title":
             selected_title = sticky_get("title_pick")
+            # Check whether a movie title has been selected
             if selected_title:
                 slider_col, label_col, drop_col, dir_col = st.columns([2.2, 0.8, 1.8, 0.5])
+                # Select num of recommendations
                 with slider_col:
                     st.slider(
                         "Number of recommendations", 5, 20,
                         value=sticky_get("cb_top_n", 10),
                         key="cb_top_n", on_change=sticky_save("cb_top_n"),
                     )
+                # Display sorting controls
                 sort_by, ascending = render_sort_controls(
                     drop_col, dir_col, sort_key="cb_sort_by", asc_key="cb_sort_asc", label_col=label_col,
                     options=CB_SORT_OPTIONS, default_ascending_map=CB_SORT_DEFAULT_ASCENDING,
                 )
-
+                # Check whether weighted rating sorting is selected
                 use_weighted = sort_by == "Weighted Rating"
+                # Generate content-based recommendations
                 recs = content_model.recommend(
                     selected_title,
                     top_n=sticky_get("cb_top_n", 10),
@@ -541,6 +568,7 @@ else:
             else:
                 st.caption("Start typing a title above to search")
         else:
+            # Display results for other search mode
             if not results.empty:
                 sort_by, ascending = render_sort_bar(sort_key="search_sort_by", asc_key="search_sort_asc")
                 results = apply_sort(results, sort_by, ascending)
@@ -549,10 +577,15 @@ else:
             elif search_mode in ("Keyword", "Overview"):
                 st.caption("Type something above to search.")
 
+    # -----------------------------------------------------------------------
+    # Collaborative Filtering
+    # -----------------------------------------------------------------------
     with tab2:
         st.subheader("Get personalized recommendations")
 
+        # Define available collaborative filtering methods
         CF_MODES = ["User ID method", "Select movies method"]
+        # Allow user to select a collaborative filtering method
         with st.container(key="sb_cf_mode"):
             cf_mode = st.selectbox(
                 "Method", CF_MODES,
@@ -561,6 +594,7 @@ else:
             )
         lock_dropdown_typing("sb_cf_mode")
 
+        # Generate recommendations using the selected method
         if cf_mode == "User ID method":
             cf_model = load_cf_model(ratings)
             valid_users = sorted(ratings["userId"].unique())
@@ -588,6 +622,7 @@ else:
                 )
                 st.dataframe(history[["title", "rating"]].sort_values("rating", ascending=False))
 
+        # Generate recommendations based on selected movies
         else:
             item_cf_model = load_item_cf_model(ratings)
 
@@ -600,7 +635,8 @@ else:
                 key="liked_titles", on_change=sticky_save("liked_titles"),
             )
             liked_titles = sticky_get("liked_titles", [])
-
+            
+            # Generate recommendations when movies are selected
             if liked_titles:
                 top_n_anon = st.slider(
                     "Number of recommendations", 5, 20,
@@ -614,8 +650,10 @@ else:
                         "Not enough overlapping rating data to build recommendations from "
                         "these picks yet. Try adding a few more movies."
                     )
+                # Display the item-based recommendations
                 else:
                     st.caption("Based on item-item similarity to your picks (users who co-rated them alike).")
                     show_movie_grid(recs, score_col="similarity_score")
+            # Ask the user to select movies first
             else:
                 st.caption("Pick a few movies you enjoy above to get started.")
