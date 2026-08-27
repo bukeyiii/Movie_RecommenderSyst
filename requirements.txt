@@ -1,4 +1,4 @@
 pandas
 numpy
 scikit-learn
-streamlit run app.py
+streamlit
